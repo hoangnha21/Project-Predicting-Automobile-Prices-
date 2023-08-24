@@ -1,0 +1,194 @@
+---
+title: "IDS 572 Homework 4"
+author: "Nabeel Khan, Nha Nguyen"
+date: '2022-12-02'
+output: pdf_document
+---
+
+```{r Load libraries}
+#Import necessary packages
+#install.packages('corrr')
+#install.packages('nnet')
+#install.packages('NeuralNetTools')
+#install.packages("fastDummies")
+#install.packages("caret")
+#install.packages("neuralnet")
+#install.packages("ROSE")
+# Import necessary libraries 
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(corrr)
+library(nnet)
+library(NeuralNetTools)
+library(fastDummies)
+library(caret)
+library(neuralnet)
+library(ROSE)
+```
+
+```{r Load dataset}
+data <- read_excel("/Users/hoangnha218/Desktop/IDS572 Homework 4/Assignment4Data.xlsx")
+View(data)
+```
+
+```{r Question 1: Exploratory Data Analysis}
+str(data) # 31 columns, 28 rows including 2 categorical and 26 numerical variables
+
+#Remove unecessary columns
+data <- data[, !names(data) %in% c("Fuel","Drs", "Cyl","Abag_1","ABS","PStr")]
+data
+# Check unique values
+unique(data$Colour)
+
+# Check missing values
+sapply(data,function(x) sum(is.na(x)))
+
+# Factor categorical variable
+data$Colour <- as.factor(data$Colour)
+
+# Check outliers with boxplot
+boxplot(data,las=2.6,vertical = TRUE,main = "Boxplot of car data")
+
+# Test relationship between categorical and numerical variables using Chi-squared test
+chisq.test(data$Price, data$Colour)
+
+# Compute the statistics of all numerical variables
+summary(data)
+```
+#Key Insights:
+#We remove the following columns because they don't affect our models' prediction output since the values of these columns remain the same for all records. The removed columns include "Fuel","Drs", "Cyl","Abag_1","ABS","PStr".
+#There are no missing values in all columns.
+#It can be observed that "Colour" is a categorical variable in the data. So, we need to factorize these variables.
+#According to the boxplot, there are no significant outliers. 
+#According to Pearson Chi-squared test, p value=0.235, greater than significance level (0.05), the variable "Colour" is not statistically significant.
+
+#Question 1 Answers:
+# The factors that influence a customer’s decision to buy a car are Horsepower (HP), Cylinder (CC), number of gear positions (Grs), Weight (Wght), Air Conditioning (AC) , Metallic Rim "M_rim" since their correlations with Price (target variable) are greater than 0.60, which refer to strong correlation. Their correlation coefficients are 0.92, 0.88, 0.76, 0.86, 0.62, 0.63 accordingly.
+
+#What are the objectives of the model that Farid plans to build?
+#...
+
+``` {r Question 2 Neural Network Model}
+#Scale data
+mynormalization <- function(x)
+{
+  (x - min(x))/(max(x)-min(x))
+}
+
+nndata <- data %>% mutate_if(is.numeric, mynormalization)
+summary(nndata)
+
+# Split train test data
+nnindx <- sample(2,nrow(nndata), replace = T, prob = c(0.7,0.3))
+nntrain <- nndata[nnindx == 1,]
+nntest <- nndata[nnindx ==2,]
+
+# Build neural network model
+nnModel <- nnet(Price ~ HP + CC + Grs + Wght + AC + M_Rim , data = nntrain, linout = F, size =10, decay = 0.01, maxit = 1000)
+summary(nnModel)
+
+# Plot the model
+library(NeuralNetTools)
+plotnet(nnModel)
+```
+```{r Question 2 NN Model Validation}
+# Predictions on test data
+nn.preds <- (predict(nnModel, nntest))
+
+# Build confusion matrix
+nnModel.CM <- table(nn.preds, nntest$Price, dnn = c("predicted", "actual"))
+nnModel.CM
+
+error <- function(nnModel.CM){
+  TN = nnModel.CM[1,1]
+  TP = nnModel.CM[2,2]
+  FN = nnModel.CM[1,2]
+  FP = nnModel.CM[2,1]
+  recall = (TP)/(TP+FN)
+  precision = (TP)/(TP+FP)
+  error = (FP+FN)/(TP+TN+FN+FP)
+  nnModel.perf <- list("precision" = precision,
+                    "recall" = recall,
+                    "error" = error)
+  return(nnModel.perf)
+}
+output <- error(nnModel.CM)
+output
+```
+
+
+``` {r Question 2 NN Model Interpretation with different hidden neurons}
+nnindx2 <- sample(2,nrow(nntrain), replace = T, prob = c(0.5,0.3))
+nntrain2 <- nntrain[nnindx2 == 1,]
+nnvalidation <- nntrain[nnindx2 ==2,]
+nnModel.err2 <- vector("numeric", 30)
+d <- seq(0.0001, 1, length.out = 30)
+k =1
+
+for(i in d){
+  model <- nnet(Price~ HP + CC + Grs + Wght + AC + M_Rim , data = nntrain2, decay=i, size=10, maxit=1000)
+  nnpred.class <- (predict(model, nnvalidation))
+  nnModel.err2[k] <- mean(nnpred.class!=nnvalidation$Price)
+  k <- k+1
+}
+plotnet(model)
+```
+
+
+```{r Question 3 Linear Regression Model}
+
+# Converting "Price" as numeric and factorize "Colour" variable
+data$Price <- as.numeric(data$Price)
+data$Colour <- as.factor(data$Colour)
+
+mynormalization <- function(x)
+{
+  (x - min(x))/(max(x)-min(x))
+}
+
+lmdata<- data %>% mutate_if(is.numeric, mynormalization)
+summary(lmdata)
+
+# Split train test
+set.seed(123)
+
+lm.indx <- sample(2,nrow(lmdata), replace = T, prob = c(0.7,0.3))
+lm.train <- lmdata[lm.indx == 1,]
+lm.test <- lmdata[lm.indx ==2,]
+
+full <- lm(lm.train$Price ~ .,data = lm.train)
+null <- lm(lm.train$Price ~ 1,data = lm.train)
+
+step(null, scope = list(lower = null, upper = full), direction = "forward", trace = 0)
+
+lmModel <- lm(formula = lm.train$Price ~ HP + Colour+ Clock + Age  + Grs, data = lm.train)
+summary(lmModel)
+
+# LR prediction on test data
+lm.pred <- predict(lmModel, newdata = lm.test)
+#mean(lm.test$Price - pred.lm)^2
+#fitted(lmModel)
+#coefficients(lmModel)
+#residuals((lmModel))
+
+# LR Mean square error (MSE)
+MSE.lm <- sum((lm.pred - lm.test$Price)^2)/nrow(lm.test)
+MSE.lm
+plot(lmModel)
+
+```
+``` {r Question 3 LR Model Validation}
+#Error percentage
+lm.error <- rmse(lm.test$Price, lm.pred)
+lm.errorpercent <- lm.error/mean(lm.test$Price)
+lm.errorpercent
+```
+
+
+#Comparing Neural Network Model and Linear Regression Model in automobile prediction
+#...
+
+#Question 4: Recommendation
+#...
